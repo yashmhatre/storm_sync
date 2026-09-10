@@ -1,9 +1,11 @@
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 
+import 'audio/sequence_engine.dart';
 import 'audio/thunder_player.dart';
 import 'ble/storm_service.dart';
 import 'model/app_settings.dart';
+import 'model/preset_repository.dart';
 import 'ui/connect_screen.dart';
 import 'ui/control_screen.dart';
 import 'ui/theme.dart';
@@ -11,23 +13,29 @@ import 'ui/theme.dart';
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
 
-  // Both of these touch platform channels, so they have to wait for the
-  // binding. Loading them here keeps the first frame free of async gaps.
+  // Load persistent configurations before first frame
   final settings = await AppSettings.load();
+  final presets = await PresetRepository.load();
   final thunder = ThunderPlayer();
   await thunder.load();
 
-  runApp(StromSyncApp(settings: settings, thunder: thunder));
+  runApp(StromSyncApp(
+    settings: settings,
+    presets: presets,
+    thunder: thunder,
+  ));
 }
 
 class StromSyncApp extends StatelessWidget {
   const StromSyncApp({
     super.key,
     required this.settings,
+    required this.presets,
     required this.thunder,
   });
 
   final AppSettings settings;
+  final PresetRepository presets;
   final ThunderPlayer thunder;
 
   @override
@@ -38,6 +46,8 @@ class StromSyncApp extends StatelessWidget {
           create: (_) => StormService()..start(),
         ),
         ChangeNotifierProvider<AppSettings>.value(value: settings),
+        ChangeNotifierProvider<PresetRepository>.value(value: presets),
+        ChangeNotifierProvider<SequenceEngine>(create: (_) => SequenceEngine()),
         Provider<ThunderPlayer>.value(value: thunder),
       ],
       child: MaterialApp(

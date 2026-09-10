@@ -4,9 +4,11 @@ import 'package:provider/provider.dart';
 import '../audio/thunder_player.dart';
 import '../ble/storm_service.dart';
 import 'tabs/colour_tab.dart';
+import 'tabs/sequencer_tab.dart';
 import 'tabs/storm_tab.dart';
 import 'tabs/tuning_tab.dart';
 import 'widgets/log_panel.dart';
+import 'widgets/preset_sheet.dart';
 import 'widgets/status_bar.dart';
 
 /// The main screen once a link exists: three tabs over a persistent status
@@ -20,7 +22,7 @@ class ControlScreen extends StatefulWidget {
 
 class _ControlScreenState extends State<ControlScreen>
     with SingleTickerProviderStateMixin {
-  late final TabController _tabs = TabController(length: 3, vsync: this);
+  late final TabController _tabs = TabController(length: 4, vsync: this);
   bool _logExpanded = false;
 
   @override
@@ -37,6 +39,16 @@ class _ControlScreenState extends State<ControlScreen>
       appBar: AppBar(
         title: const Text('StromSync'),
         actions: [
+          IconButton(
+            tooltip: 'Presets',
+            onPressed: () => showModalBottomSheet(
+              context: context,
+              isScrollControlled: true,
+              backgroundColor: Colors.transparent,
+              builder: (_) => const PresetSheet(),
+            ),
+            icon: const Icon(Icons.bookmark_outline),
+          ),
           IconButton(
             tooltip: 'Re-read parameters (LIST)',
             onPressed:
@@ -60,6 +72,7 @@ class _ControlScreenState extends State<ControlScreen>
           controller: _tabs,
           tabs: const [
             Tab(icon: Icon(Icons.thunderstorm_outlined), text: 'Storm'),
+            Tab(icon: Icon(Icons.auto_awesome_motion_outlined), text: 'Sequencer'),
             Tab(icon: Icon(Icons.tune), text: 'Tuning'),
             Tab(icon: Icon(Icons.palette_outlined), text: 'Colour'),
           ],
@@ -75,6 +88,7 @@ class _ControlScreenState extends State<ControlScreen>
                 controller: _tabs,
                 children: const [
                   StormTab(),
+                  SequencerTab(),
                   TuningTab(),
                   ColourTab(),
                 ],

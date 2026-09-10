@@ -1,0 +1,26 @@
+# AgentForge project configuration, written by `agentforge init`.
+#
+# This file holds what AgentForge reads and nothing else. Which Plugins answer
+# for this repository is decided per Run from the frozen Plan's blast radius
+# (ADR-0016), so there is no `plugins:` key here to edit.
+
+providers:
+  # What this Provider's CLI can be relied on to support, declared rather than
+  # probed (ADR-0005). `native` delivers a Role's skills as the CLI's own
+  # commands; `fragment` inlines them into the prompt instead.
+  claude:
+    capability_tier: native
+
+gates:
+  tests:
+    # The argument vector the `tests` Gate runs, in this repository, from its
+    # root. An interpreter named here is resolved against that root.
+    suite: ["flutter", "test"]
+
+context:
+  # Whether the Context Pack comment names the symbols and imports it resolved,
+  # or only counts them (ADR-0024). A Run posts that comment to the Issue, and
+  # a tracker can have a wider audience than the code — so the names are off
+  # unless this repository says otherwise. The file list is published either
+  # way: the frozen Plan on the Issue already carries it.
+  publish_inventory: false

@@ -126,6 +126,15 @@ class StormService extends ChangeNotifier {
   /// which of the three mode buttons is active.
   String? get mode => _mode;
 
+  int _boltR = 255, _boltG = 250, _boltB = 235;
+  int _tintR = 40, _tintG = 70, _tintB = 130;
+
+  /// Current bolt colour [r, g, b] (0-255).
+  List<int> get boltColor => [_boltR, _boltG, _boltB];
+
+  /// Current cloud tint colour [r, g, b] (0-255).
+  List<int> get tintColor => [_tintR, _tintG, _tintB];
+
   BluetoothCharacteristic? _rxCharacteristic;
 
   /// Some firmware exposes RX as write-with-response only. We prefer
@@ -423,6 +432,10 @@ class StormService extends ChangeNotifier {
 
   /// Throttled `COLOR <r> <g> <b>`, the bolt colour.
   void setColor(int r, int g, int b, {bool finalValue = false}) {
+    _boltR = _byte(r);
+    _boltG = _byte(g);
+    _boltB = _byte(b);
+    if (finalValue) _notify();
     _throttledWrite(
       _colorBucket,
       'COLOR ${_byte(r)} ${_byte(g)} ${_byte(b)}',
@@ -432,6 +445,10 @@ class StormService extends ChangeNotifier {
 
   /// Throttled `TINT <r> <g> <b>`, the cloud colour.
   void setTint(int r, int g, int b, {bool finalValue = false}) {
+    _tintR = _byte(r);
+    _tintG = _byte(g);
+    _tintB = _byte(b);
+    if (finalValue) _notify();
     _throttledWrite(
       _tintBucket,
       'TINT ${_byte(r)} ${_byte(g)} ${_byte(b)}',
