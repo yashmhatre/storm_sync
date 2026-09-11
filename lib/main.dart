@@ -4,6 +4,7 @@ import 'package:provider/provider.dart';
 import 'audio/sequence_engine.dart';
 import 'audio/sound_pack.dart';
 import 'audio/thunder_player.dart';
+import 'ble/background_service.dart';
 import 'ble/storm_service.dart';
 import 'model/app_settings.dart';
 import 'model/preset_repository.dart';
@@ -18,6 +19,9 @@ Future<void> main() async {
   final settings = await AppSettings.load();
   final presets = await PresetRepository.load();
   final soundPacks = await SoundPackManager.load();
+  final bgRemote = BackgroundRemoteService();
+  await bgRemote.initialize();
+
   final thunder = ThunderPlayer();
   await thunder.loadPack(soundPacks.activePack);
 
@@ -25,6 +29,7 @@ Future<void> main() async {
     settings: settings,
     presets: presets,
     soundPacks: soundPacks,
+    bgRemote: bgRemote,
     thunder: thunder,
   ));
 }
@@ -35,12 +40,14 @@ class StromSyncApp extends StatelessWidget {
     required this.settings,
     required this.presets,
     required this.soundPacks,
+    required this.bgRemote,
     required this.thunder,
   });
 
   final AppSettings settings;
   final PresetRepository presets;
   final SoundPackManager soundPacks;
+  final BackgroundRemoteService bgRemote;
   final ThunderPlayer thunder;
 
   @override
@@ -55,6 +62,7 @@ class StromSyncApp extends StatelessWidget {
         ChangeNotifierProvider<SoundPackManager>.value(value: soundPacks),
         ChangeNotifierProvider<SequenceEngine>(create: (_) => SequenceEngine()),
         ChangeNotifierProvider<ThunderPlayer>.value(value: thunder),
+        Provider<BackgroundRemoteService>.value(value: bgRemote),
       ],
       child: MaterialApp(
         title: 'StromSync',
@@ -67,16 +75,52 @@ class StromSyncApp extends StatelessWidget {
 }
 
 /// Shows the connect screen until the link is up, then the controls.
-///
-/// A dropped link keeps the control screen on screen: the service reconnects
-/// on its own and the status bar says what is happening, so a brief drop does
-/// not throw the user back to the start.
-class _Root extends StatelessWidget {
+/// Maintains lock screen / notification actions for background controls.
+class _Root extends StatefulWidget {
   const _Root();
 
   @override
+  State<_Root> createState() => _RootState();
+}
+
+class _RootState extends State<_Root> {
+  @override
+  void initState() {
+    super.initState();
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted) return;
+      final bg = context.read<BackgroundRemoteService>();
+      bg.initialize(
+        onActionSelected: (action) {
+          if (!mounted) return;
+          final storm = context.read<StormService>();
+          final thunder = context.read<ThunderPlayer>();
+          final settings = context.read<AppSettings>();
+          bg.dispatchAction(
+            action: action,
+            stormService: storm,
+            thunderPlayer: thunder,
+            appSettings: settings,
+          );
+        },
+      );
+    });
+  }
+
+  @override
   Widget build(BuildContext context) {
-    final hasSession = context.select<StormService, bool>((s) => s.hasSession);
+    final storm = context.watch<StormService>();
+    final bg = context.read<BackgroundRemoteService>();
+
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      bg.updateNotification(
+        isConnected: storm.isConnected,
+        mode: storm.mode,
+        statusText: storm.status,
+      );
+    });
+
+    final hasSession = storm.hasSession;
 
     return AnimatedSwitcher(
       duration: const Duration(milliseconds: 250),
