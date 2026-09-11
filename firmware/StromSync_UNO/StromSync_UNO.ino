@@ -1,11 +1,13 @@
 /*
  * StromSync - Arduino Uno lightning driver (300 px, ambient + rumble)
  *
- * Link from ESP32 (2 data bits + strobe):
- *   ESP32 GPIO 4 -> D4    bit 0
- *   ESP32 GPIO 5 -> D5    bit 1
- *   ESP32 GPIO 6 -> D2    strobe
- *   10k pulldown from each of D4, D5, D2 to GND
+ * Link from ESP32 (one wire, pulse counted):
+ *   ESP32 GPIO 17 -> D2       idle low, pulses high
+ *   ESP32 GND     -> GND
+ *
+ * A command is (code + 1) pulses of 25 ms, ended by 200 ms of quiet. Levels
+ * rather than timed bits, because this board is blind for ~9 ms of every frame
+ * while FastLED clocks out 300 pixels and no UART survives that.
  *
  *   D6 -> 470 ohm -> strip DIN
  *
@@ -32,9 +34,8 @@
 #define AMBIENT_BASE  22       // idle cloud brightness, try 14 to 34
 #define NOISE_GROUP   4        // pixels per noise sample, keeps the Uno fast
 
-#define PIN_BIT0      4
-#define PIN_BIT1      5
-#define PIN_STROBE    2
+#define PIN_LINK      2
+#define PULSE_GAP_MS  180      // quiet time that ends a group
 
 #define CMD_OFF       0
 #define CMD_STORM     1
@@ -46,7 +47,9 @@ CRGB leds[NUM_LEDS];
 bool     stormMode   = false;
 bool     inFlash     = false;
 bool     abortFlash  = false;
-bool     lastStrobe  = LOW;
+bool     lastLevel   = LOW;
+uint8_t  pulseCount  = 0;
+unsigned long lastEdgeAt = 0;
 uint8_t  pendingCode = 255;
 uint8_t  rumble      = 0;      // thunder energy, decays to 0
 unsigned long nextAmbientAt = 0;
@@ -62,16 +65,32 @@ uint8_t forkCount = 0;
 // ---------------------------------------------------------------- link
 
 void pollLink() {
-  bool s = digitalRead(PIN_STROBE);
-  if (s == HIGH && lastStrobe == LOW) {
-    uint8_t code = digitalRead(PIN_BIT0) | (digitalRead(PIN_BIT1) << 1);
-    if (inFlash) {
-      if (code == CMD_OFF) abortFlash = true;
-    } else {
-      pendingCode = code;
+  bool level = digitalRead(PIN_LINK);
+  unsigned long t = millis();
+
+  if (level != lastLevel) {
+    if (level == HIGH) pulseCount++;   // count rising edges only
+    lastEdgeAt = t;
+    lastLevel = level;
+  }
+
+  // A group ends when the line has been quiet long enough. One pulse is code
+  // 0, so a line that never moves is never mistaken for a command.
+  if (pulseCount > 0 && level == LOW && (t - lastEdgeAt) > PULSE_GAP_MS) {
+    uint8_t code = (uint8_t)(pulseCount - 1);
+    Serial.print(F("PULSES "));
+    Serial.print(pulseCount);
+    Serial.print(F(" -> code "));
+    Serial.println(code);
+    pulseCount = 0;
+    if (code <= CMD_HARD) {
+      if (inFlash) {
+        if (code == CMD_OFF) abortFlash = true;
+      } else {
+        pendingCode = code;
+      }
     }
   }
-  lastStrobe = s;
 }
 
 bool hold(uint16_t ms) {
@@ -277,6 +296,11 @@ void sheetFlash() {
 // -------------------------------------------------------------- control
 
 void handleCommand(uint8_t code) {
+  // One line per command. This board has no other way to say anything, and
+  // without it a working link is indistinguishable from a dead one.
+  Serial.print(F("CMD "));
+  Serial.println(code);
+
   switch (code) {
     case CMD_OFF:
       stormMode = false;
@@ -297,9 +321,8 @@ void setup() {
   Serial.begin(9600);
   delay(2000);                    // let the rail settle before drawing
 
-  pinMode(PIN_BIT0, INPUT);
-  pinMode(PIN_BIT1, INPUT);
-  pinMode(PIN_STROBE, INPUT);
+  pinMode(PIN_LINK, INPUT);
+  pinMode(LED_BUILTIN, OUTPUT);   // mirrors the link line, see loop()
 
   FastLED.addLeds<LED_TYPE, LED_PIN, COLOR_ORDER>(leds, NUM_LEDS)
          .setCorrection(TypicalLEDStrip);
@@ -313,6 +336,11 @@ void setup() {
 }
 
 void loop() {
+  // The onboard LED follows the link line. With nothing else to look at, this
+  // is how you tell a live wire from a dead one - and it makes finding the
+  // right ESP32 hole a matter of watching the board rather than running a test.
+  digitalWrite(LED_BUILTIN, digitalRead(PIN_LINK));
+
   pollLink();
 
   if (pendingCode != 255) {

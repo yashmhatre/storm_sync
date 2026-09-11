@@ -4,7 +4,7 @@
  *
  * Half of a two-board build:
  *
- *   phone --BLE--> ESP32-S3 (this sketch) --2bit--> Arduino UNO --> WS2812B x300
+ *   phone --BLE--> ESP32-S3 (this sketch) --pulses--> Arduino UNO --> WS2812B x300
  *
  * This board owns the protocol and the parameter store. It does not touch the
  * strip: the UNO renders, because it drives the DIN line at a true 5 V.
@@ -18,9 +18,8 @@
  * Replies are `OK ...`, `ERR ...` or `key=value`. The app scrapes `key=value`
  * out of any line, so `OK bri=128` both acknowledges and re-syncs the slider.
  *
- * Wiring: GPIO 4 -> UNO D4 (bit 0), GPIO 5 -> UNO D5 (bit 1),
- * GPIO 6 -> UNO D2 (strobe), 10k pulldown on each UNO input, common
- * ground. One way only, so no 5 V ever reaches a 3.3 V pin.
+ * Wiring: GPIO 17 -> UNO pin 2, GND -> GND. Two wires, one way, so no 5 V
+ * can ever reach a 3.3 V pin.
  *
  * Commands are also accepted on the USB serial console at 115200 for bench
  * testing without the phone.
@@ -35,26 +34,26 @@
 
 // ============================================================== hardware ===
 
-// Parallel link to the UNO: two data bits plus a strobe. This replaced a UART
-// because the UNO is blind for ~9 ms of every frame while FastLED clocks out
-// 300 pixels, which cost roughly a quarter of all serial bytes. Pin levels do
-// not care how long the receiver takes to look at them.
+// One-wire link to the UNO. A UART was tried first and lost roughly a quarter
+// of its bytes: the UNO is blind for ~9 ms of every frame while FastLED clocks
+// out 300 pixels, and SoftwareSerial needs interrupt timing for every bit. A
+// parallel version worked but needed four wires, three of which proved very
+// hard to locate on the header.
 //
-//   ESP32 GPIO 4 -> UNO D4    bit 0
-//   ESP32 GPIO 5 -> UNO D5    bit 1
-//   ESP32 GPIO 6 -> UNO D2    strobe
-//   10k pulldown from each UNO input to GND
-#define PIN_BIT0     4
-#define PIN_BIT1     5
-#define PIN_STROBE   6
+// So commands go as pulse counts on a single line. The UNO samples a level in
+// its own time � no interrupts, no baud rate, nothing to resynchronise. A
+// 25 ms pulse comfortably outlives the render blackout, so it cannot be missed.
+//
+//   ESP32 GPIO 17 -> UNO pin 2      (3.3 V into a 5 V input reads HIGH)
+//   ESP32 GND     -> UNO GND
+//
+// One way only. Nothing drives the ESP32, so no 5 V can ever reach a 3.3 V pin.
+#define PIN_LINK        17
 
-// The UNO edge-detects the strobe from its polling loop, so it has to stay
-// high longer than the longest stretch the UNO spends not looking — a 300-pixel
-// show(). 30 ms is comfortably past that.
-#define STROBE_HIGH_MS  30
-#define STROBE_GAP_MS   20
+#define PULSE_HIGH_MS   25   // longer than a 300-pixel show()
+#define PULSE_LOW_MS    25
+#define GROUP_GAP_MS   260   // quiet period that ends a group
 
-// Codes the UNO understands. Two bits is all the link carries.
 #define CMD_OFF      0
 #define CMD_STORM    1
 #define CMD_SOFT     2
@@ -179,15 +178,17 @@ static void txLine(const String& line) {
 
 // ---------------------------------------------------------- UNO downlink ---
 
-// Drives one 2-bit code across the link and strobes it in.
+// Sends a command as (code + 1) pulses. Code 0 is one pulse rather than none,
+// so a silent line is never mistaken for a command.
 static void unoSendCode(uint8_t code) {
-  digitalWrite(PIN_BIT0, (code & 0x01) ? HIGH : LOW);
-  digitalWrite(PIN_BIT1, (code & 0x02) ? HIGH : LOW);
-  delayMicroseconds(200);  // let the data lines settle before the edge
-  digitalWrite(PIN_STROBE, HIGH);
-  delay(STROBE_HIGH_MS);
-  digitalWrite(PIN_STROBE, LOW);
-  delay(STROBE_GAP_MS);
+  uint8_t pulses = (uint8_t)(code + 1);
+  for (uint8_t i = 0; i < pulses; i++) {
+    digitalWrite(PIN_LINK, HIGH);
+    delay(PULSE_HIGH_MS);
+    digitalWrite(PIN_LINK, LOW);
+    delay(PULSE_LOW_MS);
+  }
+  delay(GROUP_GAP_MS);
 }
 
 // The link carries four codes and nothing else, so the tunable parameters
@@ -320,53 +321,21 @@ static void handleCommand(const String& raw) {
   // Diagnostic: listen on the link pins instead of driving them, so the UNO
   // can drive a known pattern and we can see what actually arrives. Tests the
   // wires where they sit, with no replugging.
-  if (verb == "LISTEN") {
-    pinMode(PIN_BIT0, INPUT);
-    pinMode(PIN_BIT1, INPUT);
-    pinMode(PIN_STROBE, INPUT);
-    for (int i = 0; i < 60; i++) {
-      Serial.print("HEAR g6=");
-      Serial.print(digitalRead(PIN_STROBE));
-      Serial.print(" g4=");
-      Serial.print(digitalRead(PIN_BIT0));
-      Serial.print(" g5=");
-      Serial.println(digitalRead(PIN_BIT1));
-      delay(400);
+  // Diagnostic: loopback on this board alone. Put one jumper between the two
+  // holes believed to be GPIO 4 and GPIO 5, and this proves whether the pads
+  // really drive and read - independently of the UNO, the wiring between the
+  // boards, and my reading of the silkscreen.
+  // Diagnostic: pulse the link line continuously so the UNO's LED blinks when
+  // the wire is in the right hole. Move the jumper and watch the board.
+  if (verb == "HUNT") {
+    txLine("HUNT: pulsing GPIO 17 for 2 minutes - watch the UNO LED");
+    for (int i = 0; i < 240; i++) {
+      digitalWrite(PIN_LINK, HIGH);
+      delay(250);
+      digitalWrite(PIN_LINK, LOW);
+      delay(250);
     }
-    pinMode(PIN_BIT0, OUTPUT);
-    pinMode(PIN_BIT1, OUTPUT);
-    pinMode(PIN_STROBE, OUTPUT);
-    digitalWrite(PIN_BIT0, LOW);
-    digitalWrite(PIN_BIT1, LOW);
-    digitalWrite(PIN_STROBE, LOW);
-    txLine("LISTEN done");
-    return;
-  }
-
-  if (verb == "SCAN") {
-    static const int kScan[] = {
-      1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 21,
-      38, 39, 40, 41, 42, 45, 46, 47, 48
-    };
-    txLine("SCAN start");
-    for (unsigned i = 0; i < sizeof(kScan) / sizeof(kScan[0]); i++) {
-      int g = kScan[i];
-      Serial.print("SCAN pin=");
-      Serial.println(g);
-      pinMode(g, OUTPUT);
-      digitalWrite(g, LOW);
-      delay(700);
-      pinMode(g, INPUT);   // release: high-Z so only one pin is ever driven
-      delay(120);
-    }
-    // Put the real link pins back the way the firmware expects them.
-    pinMode(PIN_BIT0, OUTPUT);
-    pinMode(PIN_BIT1, OUTPUT);
-    pinMode(PIN_STROBE, OUTPUT);
-    digitalWrite(PIN_BIT0, LOW);
-    digitalWrite(PIN_BIT1, LOW);
-    digitalWrite(PIN_STROBE, LOW);
-    txLine("SCAN done");
+    txLine("HUNT done");
     return;
   }
 
@@ -465,12 +434,8 @@ void setup() {
   // until it times out — which showed up as a four-second delay between a BLE
   // command and its reply, because txLine() prints before it notifies.
   Serial.setTxTimeoutMs(0);
-  pinMode(PIN_BIT0, OUTPUT);
-  pinMode(PIN_BIT1, OUTPUT);
-  pinMode(PIN_STROBE, OUTPUT);
-  digitalWrite(PIN_BIT0, LOW);
-  digitalWrite(PIN_BIT1, LOW);
-  digitalWrite(PIN_STROBE, LOW);
+  pinMode(PIN_LINK, OUTPUT);
+  digitalWrite(PIN_LINK, LOW);   // idle low; pulses are the signal
   delay(200);
 
   loadSaved();
