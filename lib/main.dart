@@ -87,10 +87,10 @@ class _RootState extends State<_Root> {
   @override
   void initState() {
     super.initState();
-    WidgetsBinding.instance.addPostFrameCallback((_) {
+    WidgetsBinding.instance.addPostFrameCallback((_) async {
       if (!mounted) return;
       final bg = context.read<BackgroundRemoteService>();
-      bg.initialize(
+      await bg.initialize(
         onActionSelected: (action) {
           if (!mounted) return;
           final storm = context.read<StormService>();
@@ -104,6 +104,8 @@ class _RootState extends State<_Root> {
           );
         },
       );
+      // Android 13+ silently discards the notification without this grant.
+      await bg.requestPermission();
     });
   }
 

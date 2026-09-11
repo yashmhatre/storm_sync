@@ -42,10 +42,21 @@ class BackgroundRemoteService {
 
   bool get isInitialized => _initialized;
 
+  /// Handler for notification action taps. Held in a field rather than
+  /// captured by [initialize] so a later call can install the real handler:
+  /// `main()` initializes the plugin before any BuildContext exists, and
+  /// `_Root` supplies the dispatcher once the providers are available.
+  void Function(NotificationAction action)? _onActionSelected;
+
   /// Initializes local notifications with lock-screen action support.
+  /// Safe to call more than once: a repeat call re-registers
+  /// [onActionSelected] without re-initializing the plugin.
   Future<void> initialize({
     void Function(NotificationAction action)? onActionSelected,
   }) async {
+    if (onActionSelected != null) {
+      _onActionSelected = onActionSelected;
+    }
     if (_initialized) return;
 
     const androidSettings = AndroidInitializationSettings('@mipmap/ic_launcher');
@@ -55,13 +66,24 @@ class BackgroundRemoteService {
       settings: initSettings,
       onDidReceiveNotificationResponse: (response) {
         final action = NotificationAction.fromId(response.actionId);
-        if (action != null && onActionSelected != null) {
-          onActionSelected(action);
+        if (action != null) {
+          _onActionSelected?.call(action);
         }
       },
     );
 
     _initialized = true;
+  }
+
+  /// Requests the Android 13+ runtime notification permission.
+  ///
+  /// Without it the OS silently drops the persistent remote on API 33 and
+  /// newer, so the notification never appears. Returns false if declined.
+  Future<bool> requestPermission() async {
+    final android = _plugin.resolvePlatformSpecificImplementation<
+        AndroidFlutterLocalNotificationsPlugin>();
+    if (android == null) return true;
+    return await android.requestNotificationsPermission() ?? false;
   }
 
   /// Dispatches a notification action to the corresponding hardware and audio services.
