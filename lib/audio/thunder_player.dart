@@ -1,7 +1,8 @@
 import 'dart:async';
-
 import 'package:flutter/foundation.dart';
 import 'package:just_audio/just_audio.dart';
+
+import 'sound_pack.dart';
 
 /// How far away the strike is meant to read. Picks both the sample and the
 /// light-to-sound gap.
@@ -37,52 +38,86 @@ enum ThunderDistance {
 }
 
 /// Plays the thunder samples, on a delay, after the light has already fired.
-///
-/// This class knows nothing about how audio reaches the speaker. The Bluetooth
-/// speaker is paired in the phone's system settings and Android routes output
-/// to it; there is deliberately no speaker connection code anywhere in the app.
-class ThunderPlayer {
+/// Supports both bundled assets and custom imported sound packs.
+class ThunderPlayer extends ChangeNotifier {
   final Map<ThunderDistance, AudioPlayer> _players = {};
+  final Map<ThunderDistance, StreamSubscription> _stateSubs = {};
   final Set<Timer> _pending = {};
-
-  /// Assets that failed to load, so the UI can say so instead of silently
-  /// doing nothing.
   final Set<ThunderDistance> _failed = {};
 
+  SoundPack _currentPack = SoundPack.defaultPack;
+  ThunderDistance? _activePlayingDistance;
   bool _disposed = false;
 
+  SoundPack get currentPack => _currentPack;
+  ThunderDistance? get activePlayingDistance => _activePlayingDistance;
+
   bool get isReady => _players.length == ThunderDistance.values.length;
-
-  /// True if every sample failed to load, which almost always means the
-  /// placeholder assets were never replaced or the asset path is wrong.
   bool get allFailed => _failed.length == ThunderDistance.values.length;
-
   Set<ThunderDistance> get failedAssets => Set.unmodifiable(_failed);
 
-  /// Decodes all three samples up front so a strike does not pay the load cost
-  /// at the moment it needs to be on time.
+  /// True if any thunder player is currently outputting sound.
+  bool get isPlaying => _players.values.any((p) => p.playing);
+
+  /// Decodes all three samples up front for the active sound pack.
   Future<void> load() async {
+    await loadPack(_currentPack);
+  }
+
+  /// Reloads audio players with samples from [pack].
+  Future<void> loadPack(SoundPack pack) async {
+    if (_disposed) return;
+    _currentPack = pack;
+
+    // Clean up existing players
+    for (final sub in _stateSubs.values) {
+      await sub.cancel();
+    }
+    _stateSubs.clear();
+
+    for (final player in _players.values) {
+      await player.dispose();
+    }
+    _players.clear();
+    _failed.clear();
+
     await Future.wait(ThunderDistance.values.map(_loadOne));
+    notifyListeners();
   }
 
   Future<void> _loadOne(ThunderDistance distance) async {
     if (_disposed) return;
     final player = AudioPlayer();
+    final path = _currentPack.audioPathFor(distance);
+    final isAsset = _currentPack.isAssetFor(distance);
+
     try {
-      await player.setAsset(distance.asset);
+      if (isAsset) {
+        await player.setAsset(path);
+      } else {
+        await player.setFilePath(path);
+      }
+
       _players[distance] = player;
       _failed.remove(distance);
+
+      // Listen to playing state to notify visualizer widgets
+      _stateSubs[distance] = player.playerStateStream.listen((state) {
+        if (state.playing && state.processingState != ProcessingState.completed) {
+          _activePlayingDistance = distance;
+        } else if (_activePlayingDistance == distance && !state.playing) {
+          _activePlayingDistance = null;
+        }
+        notifyListeners();
+      });
     } catch (e) {
       _failed.add(distance);
-      debugPrint('[StromSync] failed to load ${distance.asset}: $e');
+      debugPrint('[StromSync] failed to load audio from $path: $e');
       await player.dispose();
     }
   }
 
   /// Schedules [distance]'s sample to play in [delay].
-  ///
-  /// The caller sends the BLE command first and calls this straight after, so
-  /// the flash always leads the sound the way it does outdoors.
   void playAfter(ThunderDistance distance, Duration delay) {
     if (_disposed) return;
 
@@ -105,12 +140,12 @@ class ThunderPlayer {
     if (player == null) return;
 
     try {
-      // Restart from the top: pressing the button twice should re-trigger the
-      // clap rather than be swallowed because the player is already playing.
+      _activePlayingDistance = distance;
+      notifyListeners();
       await player.seek(Duration.zero);
       await player.play();
     } catch (e) {
-      debugPrint('[StromSync] playback failed for ${distance.asset}: $e');
+      debugPrint('[StromSync] playback failed for $distance: $e');
     }
   }
 
@@ -120,16 +155,26 @@ class ThunderPlayer {
       timer.cancel();
     }
     _pending.clear();
+    _activePlayingDistance = null;
     await Future.wait(_players.values.map((p) => p.stop()));
+    notifyListeners();
   }
 
-  Future<void> dispose() async {
+  @override
+  void dispose() {
     _disposed = true;
     for (final timer in _pending) {
       timer.cancel();
     }
     _pending.clear();
-    await Future.wait(_players.values.map((p) => p.dispose()));
+    for (final sub in _stateSubs.values) {
+      sub.cancel();
+    }
+    _stateSubs.clear();
+    for (final player in _players.values) {
+      player.dispose();
+    }
     _players.clear();
+    super.dispose();
   }
 }

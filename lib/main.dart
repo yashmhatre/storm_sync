@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 
 import 'audio/sequence_engine.dart';
+import 'audio/sound_pack.dart';
 import 'audio/thunder_player.dart';
 import 'ble/storm_service.dart';
 import 'model/app_settings.dart';
@@ -16,12 +17,14 @@ Future<void> main() async {
   // Load persistent configurations before first frame
   final settings = await AppSettings.load();
   final presets = await PresetRepository.load();
+  final soundPacks = await SoundPackManager.load();
   final thunder = ThunderPlayer();
-  await thunder.load();
+  await thunder.loadPack(soundPacks.activePack);
 
   runApp(StromSyncApp(
     settings: settings,
     presets: presets,
+    soundPacks: soundPacks,
     thunder: thunder,
   ));
 }
@@ -31,11 +34,13 @@ class StromSyncApp extends StatelessWidget {
     super.key,
     required this.settings,
     required this.presets,
+    required this.soundPacks,
     required this.thunder,
   });
 
   final AppSettings settings;
   final PresetRepository presets;
+  final SoundPackManager soundPacks;
   final ThunderPlayer thunder;
 
   @override
@@ -47,8 +52,9 @@ class StromSyncApp extends StatelessWidget {
         ),
         ChangeNotifierProvider<AppSettings>.value(value: settings),
         ChangeNotifierProvider<PresetRepository>.value(value: presets),
+        ChangeNotifierProvider<SoundPackManager>.value(value: soundPacks),
         ChangeNotifierProvider<SequenceEngine>(create: (_) => SequenceEngine()),
-        Provider<ThunderPlayer>.value(value: thunder),
+        ChangeNotifierProvider<ThunderPlayer>.value(value: thunder),
       ],
       child: MaterialApp(
         title: 'StromSync',

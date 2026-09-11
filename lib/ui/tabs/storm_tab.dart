@@ -5,6 +5,7 @@ import '../../audio/thunder_player.dart';
 import '../../ble/storm_service.dart';
 import '../../model/app_settings.dart';
 import '../theme.dart';
+import '../widgets/audio_waveform_visualizer.dart';
 
 /// A trigger button: one BLE command plus, optionally, one thunder sample.
 class _Trigger {
@@ -104,7 +105,9 @@ class StormTab extends StatelessWidget {
             ),
           ],
         ),
-        const SizedBox(height: 28),
+        const SizedBox(height: 16),
+        const AudioWaveformVisualizer(),
+        const SizedBox(height: 24),
         _SectionLabel('Trigger'),
         const SizedBox(height: 10),
         for (final trigger in _triggers) ...[
