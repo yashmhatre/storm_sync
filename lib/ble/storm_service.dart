@@ -265,17 +265,24 @@ class StormService extends ChangeNotifier {
             final id = result.device.remoteId.str;
             if (seen.add(id)) {
               final name = _nameOf(result);
+              // The advertised service UUIDs are logged too: during bring-up an
+              // unnamed hit is only identifiable by what it offers, and seeing
+              // the NUS UUID here is what tells a silent light apart from the
+              // neighbours' earbuds.
+              final uuids = result.advertisementData.serviceUuids;
+              final services =
+                  uuids.isEmpty ? '' : ' svc=${uuids.map((u) => u.str).join(',')}';
               _addLog(
                 LogKind.info,
                 'Saw ${name.isEmpty ? '(unnamed)' : name} '
-                '[$id] at ${result.rssi} dBm',
+                '[$id] at ${result.rssi} dBm$services',
               );
             }
           }
 
           if (completer.isCompleted) return;
           for (final result in results) {
-            if (_matchesDeviceName(result)) {
+            if (_matchesTarget(result)) {
               completer.complete(result);
               return;
             }
@@ -730,6 +737,20 @@ class StormService extends ChangeNotifier {
     return result.advertisementData.advName.trim().toLowerCase() == target ||
         result.device.platformName.trim().toLowerCase() == target;
   }
+
+  /// True when the advertisement carries the Nordic UART service.
+  ///
+  /// Needed as a fallback because the local name is optional in an
+  /// advertisement: if the firmware puts its name only in the scan response,
+  /// or drops it to fit the 31-byte payload, the light shows up as an unnamed
+  /// device and no name match can ever succeed. The service UUID is what
+  /// actually identifies it.
+  static bool _advertisesNusService(ScanResult result) =>
+      result.advertisementData.serviceUuids.contains(nusService);
+
+  /// A scan hit is ours if either the name or the advertised service matches.
+  static bool _matchesTarget(ScanResult result) =>
+      _matchesDeviceName(result) || _advertisesNusService(result);
 
   bool get _isAndroid =>
       !kIsWeb && defaultTargetPlatform == TargetPlatform.android;
