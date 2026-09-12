@@ -25,6 +25,14 @@ packages:
       url: "https://pub.dev"
     source: hosted
     version: "2.13.1"
+  audio_decoder:
+    dependency: "direct main"
+    description:
+      name: audio_decoder
+      sha256: "116d71853a934ede4d2afe31a1dabfb9fe5bb50efe3df4d798dc546cf6604c9f"
+      url: "https://pub.dev"
+    source: hosted
+    version: "0.8.1"
   audio_session:
     dependency: transitive
     description:
@@ -384,6 +392,14 @@ packages:
       url: "https://pub.dev"
     source: hosted
     version: "0.4.16"
+  just_waveform:
+    dependency: "direct main"
+    description:
+      name: just_waveform
+      sha256: "8c65acd24f13b866e3377f07f8869e823f3f2d8b734938f4e6688075af40b4f2"
+      url: "https://pub.dev"
+    source: hosted
+    version: "0.0.7"
   leak_tracker:
     dependency: transitive
     description:

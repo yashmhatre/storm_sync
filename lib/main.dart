@@ -1,75 +1,121 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 
-import 'audio/sequence_engine.dart';
+import 'audio/rain_player.dart';
 import 'audio/sound_pack.dart';
+import 'audio/thunder_envelope.dart';
 import 'audio/thunder_player.dart';
-import 'ble/background_service.dart';
-import 'ble/storm_service.dart';
 import 'model/app_settings.dart';
-import 'model/preset_repository.dart';
-import 'ui/connect_screen.dart';
-import 'ui/control_screen.dart';
+import 'sp621e/sp621e_connection.dart';
+import 'sp621e/sp621e_fleet.dart';
+import 'thunder/bolt_segments.dart';
+import 'thunder/strip_calibration.dart';
+import 'thunder/thunder_engine.dart';
+import 'thunder/thunder_preset.dart';
 import 'ui/theme.dart';
-import 'services/sp621e_ble_service.dart';
+import 'ui/thunder/connect_screen.dart';
+import 'ui/thunder/thunder_home.dart';
 
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
 
-  // Load persistent configurations before first frame
+  // Everything persisted loads before the first frame, so no screen ever has
+  // to render a placeholder for settings that are already on disk.
   final settings = await AppSettings.load();
-  final presets = await PresetRepository.load();
   final soundPacks = await SoundPackManager.load();
-  final bgRemote = BackgroundRemoteService();
-  await bgRemote.initialize();
+  final calibration = await StripCalibrationStore.load();
+  final presets = await ThunderPresetStore.load();
+  final bolts = await BoltSegmentStore.load();
 
   final thunder = ThunderPlayer();
   await thunder.loadPack(soundPacks.activePack);
 
-  runApp(StromSyncApp(
-    settings: settings,
-    presets: presets,
-    soundPacks: soundPacks,
-    bgRemote: bgRemote,
-    thunder: thunder,
-  ));
+  // Decoded up front so the first rain toggle is instant, and so a missing
+  // sample is known about before any screen offers the option.
+  final rain = RainPlayer();
+  await rain.load();
+
+  // Analysing the samples takes a moment and nothing depends on it at startup,
+  // so it runs in the background; presets that follow the sound fall back to
+  // the scripted planner until it lands.
+  final envelopes = ThunderEnvelopeStore();
+  unawaited(envelopes.analyseAll());
+
+  runApp(
+    ThunderApp(
+      settings: settings,
+      soundPacks: soundPacks,
+      calibration: calibration,
+      presets: presets,
+      bolts: bolts,
+      envelopes: envelopes,
+      thunder: thunder,
+      rain: rain,
+    ),
+  );
 }
 
-class StromSyncApp extends StatelessWidget {
-  const StromSyncApp({
+/// A thunder box for an SP621E: it fires lightning across the strip and plays
+/// the clap so it lands when it should. It is not a general LED remote.
+class ThunderApp extends StatelessWidget {
+  const ThunderApp({
     super.key,
     required this.settings,
-    required this.presets,
     required this.soundPacks,
-    required this.bgRemote,
+    required this.calibration,
+    required this.presets,
+    required this.bolts,
+    required this.envelopes,
     required this.thunder,
+    required this.rain,
   });
 
   final AppSettings settings;
-  final PresetRepository presets;
   final SoundPackManager soundPacks;
-  final BackgroundRemoteService bgRemote;
+  final StripCalibrationStore calibration;
+  final ThunderPresetStore presets;
+  final BoltSegmentStore bolts;
+  final ThunderEnvelopeStore envelopes;
   final ThunderPlayer thunder;
+  final RainPlayer rain;
 
   @override
   Widget build(BuildContext context) {
     return MultiProvider(
       providers: [
-        ChangeNotifierProvider<StormService>(
-          create: (_) => StormService()..start(),
-        ),
-        ChangeNotifierProvider<Sp621eBleService>(
-          create: (_) => Sp621eBleService(),
-        ),
         ChangeNotifierProvider<AppSettings>.value(value: settings),
-        ChangeNotifierProvider<PresetRepository>.value(value: presets),
         ChangeNotifierProvider<SoundPackManager>.value(value: soundPacks),
-        ChangeNotifierProvider<SequenceEngine>(create: (_) => SequenceEngine()),
+        ChangeNotifierProvider<StripCalibrationStore>.value(value: calibration),
+        ChangeNotifierProvider<ThunderPresetStore>.value(value: presets),
+        ChangeNotifierProvider<BoltSegmentStore>.value(value: bolts),
+        ChangeNotifierProvider<ThunderEnvelopeStore>.value(value: envelopes),
         ChangeNotifierProvider<ThunderPlayer>.value(value: thunder),
-        Provider<BackgroundRemoteService>.value(value: bgRemote),
+        ChangeNotifierProvider<RainPlayer>.value(value: rain),
+        ChangeNotifierProvider<Sp621eFleet>(create: (_) => Sp621eFleet()),
+        // Screens that scan or report on one controller use the first slot;
+        // everything that drives light uses the fleet.
+        ProxyProvider<Sp621eFleet, Sp621eConnection>(
+          update: (_, fleet, _) => fleet.primary,
+        ),
+        // The engine needs the live connection, so it is built from the
+        // provider above rather than in main(). It holds that connection for
+        // its lifetime, so there is nothing for a proxy provider to update.
+        ChangeNotifierProvider<ThunderEngine>(
+          create: (context) => ThunderEngine(
+            connection: context.read<Sp621eFleet>(),
+            player: thunder,
+            rain: rain,
+            settings: settings,
+            calibration: calibration,
+            bolts: bolts,
+            envelopes: envelopes,
+          ),
+        ),
       ],
       child: MaterialApp(
-        title: 'StromSync',
+        title: 'Thunder',
         debugShowCheckedModeBanner: false,
         theme: buildStormTheme(),
         home: const _Root(),
@@ -78,61 +124,22 @@ class StromSyncApp extends StatelessWidget {
   }
 }
 
-/// Shows the connect screen until the link is up, then the controls.
-/// Maintains lock screen / notification actions for background controls.
-class _Root extends StatefulWidget {
+/// Connect screen until the controller is on the line, then the thunder
+/// controls.
+class _Root extends StatelessWidget {
   const _Root();
 
   @override
-  State<_Root> createState() => _RootState();
-}
-
-class _RootState extends State<_Root> {
-  @override
-  void initState() {
-    super.initState();
-    WidgetsBinding.instance.addPostFrameCallback((_) async {
-      if (!mounted) return;
-      final bg = context.read<BackgroundRemoteService>();
-      await bg.initialize(
-        onActionSelected: (action) {
-          if (!mounted) return;
-          final storm = context.read<StormService>();
-          final thunder = context.read<ThunderPlayer>();
-          final settings = context.read<AppSettings>();
-          bg.dispatchAction(
-            action: action,
-            stormService: storm,
-            thunderPlayer: thunder,
-            appSettings: settings,
-          );
-        },
-      );
-      // Android 13+ silently discards the notification without this grant.
-      await bg.requestPermission();
-    });
-  }
-
-  @override
   Widget build(BuildContext context) {
-    final storm = context.watch<StormService>();
-    final bg = context.read<BackgroundRemoteService>();
-
-    WidgetsBinding.instance.addPostFrameCallback((_) {
-      bg.updateNotification(
-        isConnected: storm.isConnected,
-        mode: storm.mode,
-        statusText: storm.status,
-      );
-    });
-
-    final hasSession = storm.hasSession;
+    final connected = context.select<Sp621eFleet, bool>(
+      (f) => f.isConnected,
+    );
 
     return AnimatedSwitcher(
       duration: const Duration(milliseconds: 250),
-      child: hasSession
-          ? const ControlScreen(key: ValueKey('control'))
-          : const ConnectScreen(key: ValueKey('connect')),
+      child: connected
+          ? const ThunderHome(key: ValueKey('home'))
+          : const ThunderConnectScreen(key: ValueKey('connect')),
     );
   }
 }

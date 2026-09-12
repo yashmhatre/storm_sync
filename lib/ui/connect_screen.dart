@@ -5,7 +5,6 @@ import 'package:provider/provider.dart';
 import '../ble/storm_service.dart';
 import 'widgets/log_panel.dart';
 import 'widgets/status_bar.dart';
-import '../screens/controller_screen.dart';
 
 /// First screen: get permissions, find the light, connect.
 class ConnectScreen extends StatefulWidget {
@@ -84,21 +83,6 @@ class _ConnectScreenState extends State<ConnectScreen> {
                                 fontWeight: FontWeight.w600,
                               ),
                             ),
-                          ),
-                        ),
-                        const SizedBox(height: 16),
-                        SizedBox(
-                          height: 56,
-                          child: OutlinedButton.icon(
-                            onPressed: () {
-                              Navigator.of(context).push(
-                                MaterialPageRoute(
-                                  builder: (context) => const ControllerScreen(),
-                                ),
-                              );
-                            },
-                            icon: const Icon(Icons.developer_board),
-                            label: const Text('Test SP621E Controller', style: TextStyle(fontSize: 16)),
                           ),
                         ),
                         if (denied) ...[

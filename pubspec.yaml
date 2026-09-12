@@ -45,6 +45,8 @@ dependencies:
   file_picker: ^12.2.0
   path_provider: ^2.1.6
   flutter_local_notifications: ^22.3.0
+  just_waveform: ^0.0.7
+  audio_decoder: ^0.8.1
 
 dev_dependencies:
   flutter_test:

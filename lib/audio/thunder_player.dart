@@ -117,9 +117,21 @@ class ThunderPlayer extends ChangeNotifier {
     }
   }
 
-  /// Schedules [distance]'s sample to play in [delay].
-  void playAfter(ThunderDistance distance, Duration delay) {
+  /// Schedules [distance]'s sample to play in [delay], starting [from] into
+  /// the recording.
+  ///
+  /// The seek is issued immediately rather than when the timer fires. Seeking
+  /// and buffering take time of their own, and doing them up front means the
+  /// delay spent waiting for the flash is also spent getting the decoder ready,
+  /// so playback starts when it is asked to instead of some way after.
+  void playAfter(
+    ThunderDistance distance,
+    Duration delay, {
+    Duration from = Duration.zero,
+  }) {
     if (_disposed) return;
+
+    unawaited(_prepare(distance, from));
 
     if (delay <= Duration.zero) {
       unawaited(_playNow(distance));
@@ -134,6 +146,18 @@ class ThunderPlayer extends ChangeNotifier {
     _pending.add(timer);
   }
 
+  Future<void> _prepare(ThunderDistance distance, Duration from) async {
+    if (_disposed) return;
+    final player = _players[distance];
+    if (player == null) return;
+
+    try {
+      await player.seek(from);
+    } catch (e) {
+      debugPrint('[StromSync] seek failed for $distance: $e');
+    }
+  }
+
   Future<void> _playNow(ThunderDistance distance) async {
     if (_disposed) return;
     final player = _players[distance];
@@ -142,7 +166,6 @@ class ThunderPlayer extends ChangeNotifier {
     try {
       _activePlayingDistance = distance;
       notifyListeners();
-      await player.seek(Duration.zero);
       await player.play();
     } catch (e) {
       debugPrint('[StromSync] playback failed for $distance: $e');
