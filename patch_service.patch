@@ -1,0 +1,956 @@
+--- a/lib/services/sp621e_ble_service.dart
++++ b/lib/services/sp621e_ble_service.dart
+@@ -202,21 +202,19 @@
+   }
+ 
+   Future<void> _initializeController() async {
+-    debugPrint('[SP621E] Initializing controller...');
+-    
+-    // Set the LED length to 288 per the physical layout
+-    await setLedCount(288);
+-    await Future.delayed(const Duration(milliseconds: 100));
+-
+-    // Force power on
+-    await powerOn();
+-    await Future.delayed(const Duration(milliseconds: 100));
+-    
+-    // Set to white initially so the user can easily see effects
+-    await setColor(255, 255, 255);
+-    
+-    debugPrint('[SP621E] Initialization complete');
+-  }
++  debugPrint('[SP621E] Initializing BanlanX v2 controller...');
++
++  // SP621E BanlanX v2.
++  await requestState();
++
++  await Future.delayed(
++    const Duration(milliseconds: 100),
++  );
++
++  await powerOn();
++
++  debugPrint('[SP621E] Initialization complete');
++}
+ 
+   Future<void> testProtocol(int protocolNumber) async {
+     debugPrint('[SP621E] TESTING PROTOCOL $protocolNumber (Target: Solid RED)');
+@@ -301,168 +301,750 @@
+     _updateState(_state.copyWith(connectionState: Sp621eConnectionState.disconnected));
+   }
+ 
+-  Future<void> _writeCommand(List<int> commandBytes) async {
+-    if (_writeCharacteristic == null) {
+-      debugPrint('[SP621E] WRITE SKIPPED - no characteristic! cmd: ${commandBytes.map((b) => b.toRadixString(16).padLeft(2, '0')).join(' ')}');
+-      return;
+-    }
+-    if (_state.connectionState != Sp621eConnectionState.connected) {
+-      debugPrint('[SP621E] WRITE SKIPPED - not connected!');
+-      return;
+-    }
+-
+-    final hexStr = commandBytes.map((b) => b.toRadixString(16).padLeft(2, '0')).join(' ');
+-    try {
+-      await _writeCharacteristic!.write(commandBytes, withoutResponse: true);
+-      debugPrint('[SP621E] WRITE OK: $hexStr');
+-    } catch (e) {
+-      debugPrint('[SP621E] WRITE FAILED: $hexStr error: $e');
+-    }
+-  }
+-
+-  // ===== Protocol A: 7E frame format =====
+-  // Frame: [0x7E, len, cmd, subcmd, data..., 0x00, 0xEF]
+-  
+-  Future<void> powerOn() async {
+-    // Try all known power on commands
+-    await _writeCommand([0x7E, 0x04, 0x04, 0x01, 0x00, 0x00, 0xFF, 0x00, 0xEF]);
+-    await _writeCommand([0x7E, 0x00, 0x04, 0x01, 0x00, 0x00, 0x00, 0x00, 0xEF]);
+-    await _writeCommand([0xCC, 0x23, 0x33]);
+-    _updateState(_state.copyWith(isOn: true));
+-  }
+-
+-  Future<void> powerOff() async {
+-    await _writeCommand([0x7E, 0x04, 0x04, 0x00, 0x00, 0x00, 0xFF, 0x00, 0xEF]);
+-    await _writeCommand([0x7E, 0x00, 0x04, 0x00, 0x00, 0x00, 0x00, 0x00, 0xEF]);
+-    await _writeCommand([0xCC, 0x24, 0x33]);
+-    _updateState(_state.copyWith(isOn: false));
+-  }
+-
+-  Future<void> setBrightness(int brightness) async {
+-    final clamped = brightness.clamp(0, 255);
+-    // 7E frame brightness: 7E 04 01 brightness 00 00 FF 00 EF
+-    await _writeCommand([0x7E, 0x04, 0x01, clamped, 0x00, 0x00, 0xFF, 0x00, 0xEF]);
+-    await _writeCommand([0x7E, 0x00, 0x01, clamped, 0x00, 0x00, 0x00, 0x00, 0xEF]);
+-    _updateState(_state.copyWith(brightness: clamped));
+-  }
+-
+-  Future<void> setColor(int r, int g, int b) async {
+-    final rc = r.clamp(0, 255);
+-    final gc = g.clamp(0, 255);
+-    final bc = b.clamp(0, 255);
+-    // Protocol A: 7E 07 05 03 RR GG BB 00 EF
+-    await _writeCommand([0x7E, 0x07, 0x05, 0x03, rc, gc, bc, 0x00, 0xEF]);
+-    // Protocol C: 7E 00 05 03 RR GG BB 00 EF
+-    await _writeCommand([0x7E, 0x00, 0x05, 0x03, rc, gc, bc, 0x00, 0xEF]);
+-    // Protocol B: 56 RR GG BB 00 F0 AA
+-    await _writeCommand([0x56, rc, gc, bc, 0x00, 0xF0, 0xAA]);
+-    _updateState(_state.copyWith(r: rc, g: gc, b: bc));
+-  }
+-
+-  Future<void> setEffect(int effect) async {
+-    // 7E frame effect: 7E 05 03 effect speed 00 FF 00 EF
+-    await _writeCommand([0x7E, 0x05, 0x03, effect, 0x03, 0x00, 0xFF, 0x00, 0xEF]);
+-    await _writeCommand([0x7E, 0x00, 0x03, effect, 0x03, 0x00, 0x00, 0x00, 0xEF]);
+-    _updateState(_state.copyWith(effect: effect));
+-  }
+-
+-  Future<void> setEffectSpeed(int speed) async {
+-    final clamped = speed.clamp(1, 10);
+-    await _writeCommand([0x7E, 0x04, 0x02, clamped, 0x00, 0x00, 0xFF, 0x00, 0xEF]);
+-    await _writeCommand([0x7E, 0x00, 0x02, clamped, 0x00, 0x00, 0x00, 0x00, 0xEF]);
+-    _updateState(_state.copyWith(effectSpeed: clamped));
+-  }
+-
+-  Future<void> requestState() async {
+-    await _writeCommand([0x7E, 0x04, 0x10, 0x00, 0x00, 0x00, 0xFF, 0x00, 0xEF]);
+-  }
+-
+-  Timer? _stormTimer;
+-  final _random = math.Random();
+-  LightningScheduler? _lightningScheduler;
+-  final LightningGenerator _lightningGenerator = LightningGenerator();
+-
+-  Future<void> _initLightningScheduler() async {
+-    _lightningScheduler ??= LightningScheduler(
+-      writeColor: (r, g, b) => _fastSetColor(r, g, b),
+-      playThunder: (delayMs) {
+-        // Find a way to play audio. Wait, triggerThunder doesn't have the player here?
+-        // We will pass the player into triggerThunder, and the scheduler will use a lambda.
+-      },
+-    );
+-  }
+-
+-  Future<void> flashWhite(int brightness) async {
+-    final clamped = brightness.clamp(0, 255);
+-    await setBrightness(clamped);
+-    await Future.delayed(const Duration(milliseconds: 20));
+-    await setColor(255, 255, 255);
+-  }
+-
+-  Future<void> restoreBackground() async {
+-    if (!_state.isOn) {
++// ============================================================
++// SP621E / BanlanX v2 protocol
++// ============================================================
++
++static const Duration _bleCommandGap =
++    Duration(milliseconds: 35);
++
++static const int _solidEffect = 0xBE;
++
++// Confirmed BanlanX v2 effect:
++// 0x8D = White Segment Spin
++static const int _whiteSegmentSpinEffect = 0x8D;
++
++// 80 cm visible row @ 60 LED/m = 48 LEDs.
++static const int _rowBatchLength = 48;
++
++Future<void> _writeChain = Future<void>.value();
++
++Future<void> _writeCommand(List<int> commandBytes) {
++  _writeChain = _writeChain.then((_) async {
++    final characteristic = _writeCharacteristic;
++
++    if (characteristic == null) {
++      debugPrint(
++        '[SP621E] WRITE SKIPPED - no characteristic',
++      );
++      return;
++    }
++
++    if (_state.connectionState !=
++        Sp621eConnectionState.connected) {
++      debugPrint(
++        '[SP621E] WRITE SKIPPED - not connected',
++      );
++      return;
++    }
++
++    final hex = commandBytes
++        .map(
++          (b) => b
++              .toRadixString(16)
++              .padLeft(2, '0')
++              .toUpperCase(),
++        )
++        .join(' ');
++
++    try {
++      final withoutResponse =
++          characteristic.properties.writeWithoutResponse;
++
++      await characteristic.write(
++        commandBytes,
++        withoutResponse: withoutResponse,
++      );
++
++      debugPrint('[SP621E] WRITE: $hex');
++
++      // SP621E behaves much more reliably when commands are
++      // not dumped into the GATT characteristic back-to-back.
++      await Future.delayed(_bleCommandGap);
++    } catch (e) {
++      debugPrint(
++        '[SP621E] WRITE FAILED: $hex error=$e',
++      );
++    }
++  });
++
++  return _writeChain;
++}
++
++// ============================================================
++// Basic controller commands
++// ============================================================
++
++Future<void> powerOn() async {
++  await _writeCommand([
++    0xA0,
++    0x62,
++    0x01,
++    0x01,
++  ]);
++
++  _updateState(
++    _state.copyWith(isOn: true),
++  );
++}
++
++Future<void> powerOff() async {
++  await _writeCommand([
++    0xA0,
++    0x62,
++    0x01,
++    0x00,
++  ]);
++
++  _updateState(
++    _state.copyWith(isOn: false),
++  );
++}
++
++Future<void> setBrightness(int brightness) async {
++  final value =
++      brightness.clamp(0, 255).toInt();
++
++  await _writeCommand([
++    0xA0,
++    0x66,
++    0x01,
++    value,
++  ]);
++
++  _updateState(
++    _state.copyWith(
++      brightness: value,
++    ),
++  );
++}
++
++Future<void> setEffect(int effect) async {
++  final value =
++      effect.clamp(0, 255).toInt();
++
++  await _writeCommand([
++    0xA0,
++    0x63,
++    0x01,
++    value,
++  ]);
++
++  _updateState(
++    _state.copyWith(effect: value),
++  );
++}
++
++Future<void> setEffectSpeed(int speed) async {
++  final value =
++      speed.clamp(1, 10).toInt();
++
++  await _writeCommand([
++    0xA0,
++    0x67,
++    0x01,
++    value,
++  ]);
++
++  _updateState(
++    _state.copyWith(
++      effectSpeed: value,
++    ),
++  );
++}
++
++Future<void> setEffectLength(int length) async {
++  final value =
++      length.clamp(1, 150).toInt();
++
++  await _writeCommand([
++    0xA0,
++    0x68,
++    0x01,
++    value,
++  ]);
++
++  _updateState(
++    _state.copyWith(
++      effectLength: value,
++    ),
++  );
++}
++
++Future<void> requestState() async {
++  await _writeCommand([
++    0xA0,
++    0x70,
++    0x00,
++  ]);
++}
++
++// ============================================================
++// Static RGB
++// ============================================================
++
++Future<void> setColor(
++  int r,
++  int g,
++  int b, {
++  int? brightness,
++}) async {
++  final red = r.clamp(0, 255).toInt();
++  final green = g.clamp(0, 255).toInt();
++  final blue = b.clamp(0, 255).toInt();
++
++  final level = (brightness ?? _state.brightness)
++      .clamp(0, 255)
++      .toInt();
++
++  // Enter solid RGB mode.
++  await _writeCommand([
++    0xA0,
++    0x63,
++    0x01,
++    _solidEffect,
++  ]);
++
++  // BanlanX RGB command.
++  await _writeCommand([
++    0xA0,
++    0x69,
++    0x04,
++    red,
++    green,
++    blue,
++    level,
++  ]);
++
++  _updateState(
++    _state.copyWith(
++      r: red,
++      g: green,
++      b: blue,
++      brightness: level,
++      effect: _solidEffect,
++    ),
++  );
++}
++
++Future<void> setStaticMode() async {
++  await setEffect(_solidEffect);
++}
++
++Future<void> flashWhite(int brightness) async {
++  await setColor(
++    245,
++    250,
++    255,
++    brightness: brightness,
++  );
++}
++
++// ============================================================
++// Lightning helpers
++// ============================================================
++
++Timer? _stormTimer;
++
++final math.Random _random = math.Random();
++
++Future<void> _goDark(int milliseconds) async {
++  // Switching to solid black is deliberate.
++  //
++  // It stops the previous moving segment so that the next
++  // White Segment Spin command begins as a visually separate
++  // lightning batch.
++  await setColor(
++    0,
++    0,
++    0,
++    brightness: 0,
++  );
++
++  await Future.delayed(
++    Duration(milliseconds: milliseconds),
++  );
++}
++
++/// Runs one moving white lightning batch.
++///
++/// SP621E cannot address arbitrary ranges such as LEDs 60-107
++/// directly. Instead its firmware moves a white segment through
++/// the continuous strip.
++///
++/// 48 LEDs corresponds to one 80 cm visible row.
++Future<void> _runBatchStrike({
++  required double intensity,
++  int segmentLength = _rowBatchLength,
++  int? visualDurationMs,
++  int? speed,
++}) async {
++  final actualIntensity =
++      intensity.clamp(0.0, 1.0);
++
++  final brightness =
++      (255 * actualIntensity)
++          .round()
++          .clamp(1, 255)
++          .toInt();
++
++  final actualLength =
++      segmentLength.clamp(8, 80).toInt();
++
++  final actualSpeed =
++      (speed ?? (8 + _random.nextInt(3)))
++          .clamp(1, 10)
++          .toInt();
++
++  // White Segment Spin.
++  //
++  // IMPORTANT:
++  // This is the command that prevents every LED from simply
++  // becoming white simultaneously.
++  await _writeCommand([
++    0xA0,
++    0x63,
++    0x01,
++    _whiteSegmentSpinEffect,
++  ]);
++
++  await _writeCommand([
++    0xA0,
++    0x68,
++    0x01,
++    actualLength,
++  ]);
++
++  await _writeCommand([
++    0xA0,
++    0x67,
++    0x01,
++    actualSpeed,
++  ]);
++
++  await _writeCommand([
++    0xA0,
++    0x66,
++    0x01,
++    brightness,
++  ]);
++
++  _updateState(
++    _state.copyWith(
++      effect: _whiteSegmentSpinEffect,
++      effectLength: actualLength,
++      effectSpeed: actualSpeed,
++      brightness: brightness,
++    ),
++  );
++
++  final duration =
++      visualDurationMs ??
++      (115 + _random.nextInt(90));
++
++  debugPrint(
++    '[LIGHTNING] batch '
++    'len=$actualLength '
++    'speed=$actualSpeed '
++    'brightness=$brightness '
++    'duration=${duration}ms',
++  );
++
++  await Future.delayed(
++    Duration(milliseconds: duration),
++  );
++}
++
++/// One short full-room impact flash.
++///
++/// This is deliberately different from [_runBatchStrike].
++/// The moving batches create spatial motion; the impact flash
++/// simulates the room being illuminated by the main discharge.
++Future<void> _impactFlash({
++  required double intensity,
++  int? durationMs,
++}) async {
++  final level =
++      (255 * intensity.clamp(0.0, 1.0))
++          .round()
++          .clamp(1, 255)
++          .toInt();
++
++  await setColor(
++    245,
++    250,
++    255,
++    brightness: level,
++  );
++
++  final duration =
++      durationMs ??
++      (38 + _random.nextInt(25));
++
++  debugPrint(
++    '[LIGHTNING] IMPACT '
++    'brightness=$level '
++    'duration=${duration}ms',
++  );
++
++  await Future.delayed(
++    Duration(milliseconds: duration),
++  );
++}
++
++ThunderDistance _audioDistance(
++  LightningProfile profile,
++) {
++  switch (profile) {
++    case LightningProfile.distant:
++      return ThunderDistance.far;
++
++    case LightningProfile.normal:
++      return ThunderDistance.mid;
++
++    case LightningProfile.close:
++    case LightningProfile.violent:
++      return ThunderDistance.close;
++  }
++}
++
++Duration _thunderDelay(
++  LightningProfile profile,
++) {
++  switch (profile) {
++    case LightningProfile.distant:
++      return Duration(
++        milliseconds:
++            2200 + _random.nextInt(2001),
++      );
++
++    case LightningProfile.normal:
++      return Duration(
++        milliseconds:
++            700 + _random.nextInt(901),
++      );
++
++    case LightningProfile.close:
++      return Duration(
++        milliseconds:
++            180 + _random.nextInt(371),
++      );
++
++    case LightningProfile.violent:
++      return Duration(
++        milliseconds:
++            100 + _random.nextInt(301),
++      );
++  }
++}
++
++// ============================================================
++// Main realistic lightning event
++// ============================================================
++
++Future<void> triggerThunder(
++  ThunderPlayer thunderPlayer, {
++  LightningProfile? profile,
++}) async {
++  if (_state.connectionState !=
++      Sp621eConnectionState.connected) {
++    debugPrint(
++      '[LIGHTNING] ignored - SP621E not connected',
++    );
++    return;
++  }
++
++  final selected =
++      profile ?? LightningProfile.normal;
++
++  // Save the user's actual background before the lightning
++  // engine starts changing controller state.
++  final originalIsOn = _state.isOn;
++  final originalBrightness = _state.brightness;
++
++  final originalR = _state.r;
++  final originalG = _state.g;
++  final originalB = _state.b;
++
++  final originalEffect = _state.effect;
++  final originalSpeed = _state.effectSpeed;
++  final originalLength = _state.effectLength;
++
++  final thunderDelay =
++      _thunderDelay(selected);
++
++  thunderPlayer.playAfter(
++    _audioDistance(selected),
++    thunderDelay,
++  );
++
++  debugPrint(
++    '[LIGHTNING] START '
++    'profile=${selected.name} '
++    'thunder=${thunderDelay.inMilliseconds}ms',
++  );
++
++  try {
++    if (!originalIsOn) {
++      await powerOn();
++    }
++
++    // --------------------------------------------------------
++    // DISTANT
++    // --------------------------------------------------------
++
++    if (selected ==
++        LightningProfile.distant) {
++      await _runBatchStrike(
++        intensity:
++            0.40 +
++            (_random.nextDouble() * 0.20),
++        segmentLength:
++            24 + _random.nextInt(13),
++        visualDurationMs:
++            150 + _random.nextInt(80),
++        speed: 7,
++      );
++
++      await _goDark(
++        70 + _random.nextInt(60),
++      );
++
++      if (_random.nextDouble() < 0.55) {
++        await _runBatchStrike(
++          intensity:
++              0.30 +
++              (_random.nextDouble() * 0.18),
++          segmentLength:
++              18 + _random.nextInt(15),
++          visualDurationMs:
++              110 + _random.nextInt(80),
++          speed: 6,
++        );
++      }
++
++      return;
++    }
++
++    // --------------------------------------------------------
++    // PRECURSOR
++    // --------------------------------------------------------
++
++    if (_random.nextDouble() < 0.50) {
++      await _runBatchStrike(
++        intensity:
++            0.25 +
++            (_random.nextDouble() * 0.25),
++        segmentLength:
++            18 + _random.nextInt(19),
++        visualDurationMs:
++            90 + _random.nextInt(70),
++      );
++
++      await _goDark(
++        35 + _random.nextInt(40),
++      );
++    }
++
++    // --------------------------------------------------------
++    // MAIN MOVING BATCH
++    // --------------------------------------------------------
++
++    await _runBatchStrike(
++      intensity:
++          0.82 +
++          (_random.nextDouble() * 0.18),
++      segmentLength: _rowBatchLength,
++      visualDurationMs:
++          120 + _random.nextInt(70),
++      speed: 10,
++    );
++
++    await _goDark(
++      30 + _random.nextInt(35),
++    );
++
++    // --------------------------------------------------------
++    // MAIN RETURN-STROKE IMPACT
++    //
++    // Intentionally illuminates the entire wall very briefly.
++    // --------------------------------------------------------
++
++    await _impactFlash(
++      intensity:
++          0.92 +
++          (_random.nextDouble() * 0.08),
++      durationMs:
++          38 + _random.nextInt(25),
++    );
++
++    await _goDark(
++      35 + _random.nextInt(35),
++    );
++
++    // --------------------------------------------------------
++    // FIRST RESTRIKE / SECOND BATCH
++    // --------------------------------------------------------
++
++    if (_random.nextDouble() < 0.88) {
++      await _runBatchStrike(
++        intensity:
++            0.55 +
++            (_random.nextDouble() * 0.25),
++        segmentLength:
++            28 + _random.nextInt(21),
++        visualDurationMs:
++            90 + _random.nextInt(65),
++        speed:
++            8 + _random.nextInt(3),
++      );
++
++      await _goDark(
++        35 + _random.nextInt(50),
++      );
++    }
++
++    // --------------------------------------------------------
++    // Close and violent strikes get an additional return stroke.
++    // --------------------------------------------------------
++
++    if (selected == LightningProfile.close ||
++        selected == LightningProfile.violent) {
++      await _impactFlash(
++        intensity:
++            0.62 +
++            (_random.nextDouble() * 0.30),
++        durationMs:
++            28 + _random.nextInt(24),
++      );
++
++      await _goDark(
++        30 + _random.nextInt(40),
++      );
++    }
++
++    // --------------------------------------------------------
++    // SECOND MOVING RESTRIKE
++    // --------------------------------------------------------
++
++    final secondaryProbability =
++        selected == LightningProfile.violent
++            ? 0.90
++            : 0.48;
++
++    if (_random.nextDouble() <
++        secondaryProbability) {
++      await _runBatchStrike(
++        intensity:
++            0.35 +
++            (_random.nextDouble() * 0.30),
++        segmentLength:
++            18 + _random.nextInt(25),
++        visualDurationMs:
++            75 + _random.nextInt(65),
++        speed:
++            8 + _random.nextInt(3),
++      );
++
++      await _goDark(
++        30 + _random.nextInt(55),
++      );
++    }
++
++    // --------------------------------------------------------
++    // Small final branch / flicker
++    // --------------------------------------------------------
++
++    final finalBranchChance =
++        selected == LightningProfile.violent
++            ? 0.75
++            : 0.32;
++
++    if (_random.nextDouble() <
++        finalBranchChance) {
++      await _runBatchStrike(
++        intensity:
++            0.20 +
++            (_random.nextDouble() * 0.25),
++        segmentLength:
++            12 + _random.nextInt(19),
++        visualDurationMs:
++            65 + _random.nextInt(45),
++        speed: 10,
++      );
++
++      await _goDark(
++        30 + _random.nextInt(35),
++      );
++    }
++  } finally {
++    // ========================================================
++    // Restore exactly what the user had before the lightning.
++    // ========================================================
++
++    debugPrint('[LIGHTNING] RESTORE');
++
++    if (!originalIsOn) {
+       await powerOff();
+-      return;
+-    }
++    } else {
++      await powerOn();
++
++      await setBrightness(
++        originalBrightness,
++      );
++
++      if (originalEffect == _solidEffect ||
++          originalEffect == 0) {
++        await setColor(
++          originalR,
++          originalG,
++          originalB,
++          brightness: originalBrightness,
++        );
++      } else {
++        await setEffect(
++          originalEffect,
++        );
++
++        await setEffectSpeed(
++          originalSpeed,
++        );
++
++        await setEffectLength(
++          originalLength,
++        );
++
++        await setBrightness(
++          originalBrightness,
++        );
++      }
++    }
++
++    debugPrint('[LIGHTNING] COMPLETE');
++  }
++}
++
++Future<void> restoreBackground() async {
++  if (!_state.isOn) {
++    await powerOff();
++    return;
++  }
++
++  if (_state.effect == _solidEffect ||
++      _state.effect == 0) {
++    await setColor(
++      _state.r,
++      _state.g,
++      _state.b,
++      brightness: _state.brightness,
++    );
++  } else {
++    await setEffect(_state.effect);
++    await setEffectSpeed(_state.effectSpeed);
++    await setEffectLength(_state.effectLength);
+     await setBrightness(_state.brightness);
+-    await Future.delayed(const Duration(milliseconds: 20));
+-    if (_state.effect == 0) {
+-      await setColor(_state.r, _state.g, _state.b);
+-    } else {
+-      await setEffect(_state.effect);
+-    }
+-  }
+-
+-  Future<void> setStaticMode() async {
+-    // 7E 04 04 01 00 00 FF 00 EF forces the controller into static color mode
+-    await _writeCommand([0x7E, 0x04, 0x04, 0x01, 0x00, 0x00, 0xFF, 0x00, 0xEF]);
+-  }
+-
+-  Future<void> _fastSetColor(int r, int g, int b) async {
+-    await _writeCommand([0x7E, 0x07, 0x05, 0x03, r, g, b, 0x00, 0xEF]);
+-    // CRITICAL: Prevent packet merging
+-    await Future.delayed(const Duration(milliseconds: 40));
+-  }
+-
+-  Future<void> triggerThunder(ThunderPlayer thunderPlayer, {LightningProfile? profile}) async {
+-    final prof = profile ?? LightningProfile.normal;
+-    
+-    // Generate the deterministic (or random seeded) sequence
+-    final sequence = _lightningGenerator.generate(prof);
+-
+-    // Initialize scheduler with the current audio player
+-    _lightningScheduler = LightningScheduler(
+-      writeColor: (r, g, b) => _fastSetColor(r, g, b),
+-      playThunder: (delayMs) {
+-        // Use the closest matching distance from ThunderDistance based on ms
+-        // For simplicity, we just use the raw delay in ThunderPlayer by adding a playWithRawDelay method
+-        // Or we just map the generated delay to a ThunderDistance roughly.
+-        ThunderDistance dist;
+-        if (delayMs.inMilliseconds < 600) dist = ThunderDistance.close;
+-        else if (delayMs.inMilliseconds < 1500) dist = ThunderDistance.mid;
+-        else dist = ThunderDistance.far;
+-        
+-        thunderPlayer.playAfter(dist, delayMs);
+-      },
+-    );
+-
+-    // Force static mode before strike
+-    await setStaticMode();
+-    await Future.delayed(const Duration(milliseconds: 50));
+-
+-    // Execute with try/finally to restore background
+-    final originalR = _state.r;
+-    final originalG = _state.g;
+-    final originalB = _state.b;
+-    final originalEffect = _state.effect;
+-    
+-    try {
+-      await _lightningScheduler!.execute(sequence);
+-    } finally {
+-      // Return to background
+-      await restoreBackground();
+-    }
+-  }
++  }
++}
+ 
+   void toggleStormMode(ThunderPlayer player, bool enable) {
+     if (enable) {
+@@ -1077,7 +1077,6 @@
+ 
+   @override
+   void dispose() {
+-    _lightningScheduler?.cancel();
+     _scanSub?.cancel();
+     _connectionSub?.cancel();
+     _stormTimer?.cancel();

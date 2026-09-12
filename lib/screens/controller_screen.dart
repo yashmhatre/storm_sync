@@ -144,6 +144,17 @@ class _ControllerScreenState extends State<ControllerScreen> {
           },
         ),
         const SizedBox(height: 8),
+        const Text('Effect Length'),
+        Slider(
+          value: state.effectLength.toDouble(),
+          min: 1,
+          max: 150,
+          divisions: 149,
+          onChanged: (value) {
+            bleService.setEffectLength(value.toInt());
+          },
+        ),
+        const SizedBox(height: 8),
         Row(
           mainAxisAlignment: MainAxisAlignment.spaceBetween,
           children: [
@@ -152,10 +163,10 @@ class _ControllerScreenState extends State<ControllerScreen> {
           ],
         ),
         Slider(
-          value: state.effect.toDouble(),
+          value: state.effect.toDouble().clamp(0, 255),
           min: 0,
-          max: 150,
-          divisions: 150,
+          max: 255,
+          divisions: 255,
           label: state.effect.toString(),
           activeColor: Colors.purple,
           onChanged: (value) {
@@ -172,7 +183,7 @@ class _ControllerScreenState extends State<ControllerScreen> {
           title: const Text('Continuous Storm Mode', style: TextStyle(fontWeight: FontWeight.bold)),
           subtitle: const Text('Periodically triggers random lightning strikes'),
           value: state.isStormMode,
-          activeColor: Colors.amber,
+          activeTrackColor: Colors.amber,
           onChanged: (value) {
             bleService.toggleStormMode(thunderPlayer, value);
           },
@@ -205,7 +216,7 @@ class _ControllerScreenState extends State<ControllerScreen> {
           child: ElevatedButton.icon(
             onPressed: state.isStormMode 
                 ? null 
-                : () => bleService.triggerThunder(_thunderPlayer, profile: _selectedProfile),
+                : () => bleService.triggerThunder(thunderPlayer, profile: _selectedProfile),
             icon: const Icon(Icons.flash_on, size: 28),
             label: const Text('TRIGGER LIGHTNING', style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
             style: ElevatedButton.styleFrom(

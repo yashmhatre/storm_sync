@@ -596,11 +596,20 @@ Future<void> _runBatchStrike({
           .clamp(1, 10)
           .toInt();
 
+  // Set color to white first, so the segment spin effect isn't black!
+  // This temporarily switches to solid mode, but the next command
+  // instantly switches it to the spin effect.
+  await _writeCommand([
+    0xA0,
+    0x69,
+    0x04,
+    255,
+    255,
+    255,
+    brightness,
+  ]);
+
   // White Segment Spin.
-  //
-  // IMPORTANT:
-  // This is the command that prevents every LED from simply
-  // becoming white simultaneously.
   await _writeCommand([
     0xA0,
     0x63,
@@ -678,8 +687,8 @@ Future<void> _impactFlash({
   );
 
   final duration =
-      durationMs ??
-      (38 + _random.nextInt(25));
+      (durationMs ??
+      (38 + _random.nextInt(25))) + 20;
 
   debugPrint(
     '[LIGHTNING] IMPACT '
@@ -773,11 +782,6 @@ Future<void> triggerThunder(
   final thunderDelay =
       _thunderDelay(selected);
 
-  thunderPlayer.playAfter(
-    _audioDistance(selected),
-    thunderDelay,
-  );
-
   debugPrint(
     '[LIGHTNING] START '
     'profile=${selected.name} '
@@ -795,6 +799,11 @@ Future<void> triggerThunder(
 
     if (selected ==
         LightningProfile.distant) {
+      thunderPlayer.playAfter(
+        _audioDistance(selected),
+        thunderDelay,
+      );
+
       await _runBatchStrike(
         intensity:
             0.40 +
@@ -870,6 +879,11 @@ Future<void> triggerThunder(
     // Intentionally illuminates the entire wall very briefly.
     // --------------------------------------------------------
 
+    thunderPlayer.playAfter(
+      _audioDistance(selected),
+      thunderDelay,
+    );
+
     await _impactFlash(
       intensity:
           0.92 +
@@ -910,7 +924,12 @@ Future<void> triggerThunder(
 
     if (selected == LightningProfile.close ||
         selected == LightningProfile.violent) {
-      await _impactFlash(
+      thunderPlayer.playAfter(
+      _audioDistance(selected),
+      thunderDelay,
+    );
+
+    await _impactFlash(
         intensity:
             0.62 +
             (_random.nextDouble() * 0.30),
