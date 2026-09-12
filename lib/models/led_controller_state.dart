@@ -56,6 +56,7 @@ class Sp621eControllerState {
       b: b ?? this.b,
       effect: effect ?? this.effect,
       effectSpeed: effectSpeed ?? this.effectSpeed,
+      effectLength: effectLength ?? this.effectLength,
       isStormMode: isStormMode ?? this.isStormMode,
     );
   }

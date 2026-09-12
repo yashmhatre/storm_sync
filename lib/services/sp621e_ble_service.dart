@@ -376,42 +376,27 @@ Future<void> _writeCommand(List<int> commandBytes) {
 // ============================================================
 
 Future<void> powerOn() async {
-  await _writeCommand([
-    0xA0,
-    0x62,
-    0x01,
-    0x01,
-  ]);
-
+  await _writeCommand([0x7E, 0x04, 0x04, 0x01, 0x00, 0x00, 0xFF, 0x00, 0xEF]);
+  await _writeCommand([0x7E, 0x00, 0x04, 0x01, 0x00, 0x00, 0x00, 0x00, 0xEF]);
+  await _writeCommand([0xCC, 0x23, 0x33]);
   _updateState(
     _state.copyWith(isOn: true),
   );
 }
 
 Future<void> powerOff() async {
-  await _writeCommand([
-    0xA0,
-    0x62,
-    0x01,
-    0x00,
-  ]);
-
+  await _writeCommand([0x7E, 0x04, 0x04, 0x00, 0x00, 0x00, 0xFF, 0x00, 0xEF]);
+  await _writeCommand([0x7E, 0x00, 0x04, 0x00, 0x00, 0x00, 0x00, 0x00, 0xEF]);
+  await _writeCommand([0xCC, 0x24, 0x33]);
   _updateState(
     _state.copyWith(isOn: false),
   );
 }
 
 Future<void> setBrightness(int brightness) async {
-  final value =
-      brightness.clamp(0, 255).toInt();
-
-  await _writeCommand([
-    0xA0,
-    0x66,
-    0x01,
-    value,
-  ]);
-
+  final value = brightness.clamp(0, 255).toInt();
+  await _writeCommand([0x7E, 0x04, 0x01, value, 0x00, 0x00, 0xFF, 0x00, 0xEF]);
+  await _writeCommand([0x7E, 0x00, 0x01, value, 0x00, 0x00, 0x00, 0x00, 0xEF]);
   _updateState(
     _state.copyWith(
       brightness: value,
@@ -420,32 +405,18 @@ Future<void> setBrightness(int brightness) async {
 }
 
 Future<void> setEffect(int effect) async {
-  final value =
-      effect.clamp(0, 255).toInt();
-
-  await _writeCommand([
-    0xA0,
-    0x63,
-    0x01,
-    value,
-  ]);
-
+  final value = effect.clamp(0, 255).toInt();
+  await _writeCommand([0x7E, 0x04, 0x03, value, 0x00, 0x00, 0xFF, 0x00, 0xEF]);
+  await _writeCommand([0x7E, 0x00, 0x03, value, 0x00, 0x00, 0x00, 0x00, 0xEF]);
   _updateState(
     _state.copyWith(effect: value),
   );
 }
 
 Future<void> setEffectSpeed(int speed) async {
-  final value =
-      speed.clamp(1, 10).toInt();
-
-  await _writeCommand([
-    0xA0,
-    0x67,
-    0x01,
-    value,
-  ]);
-
+  final value = speed.clamp(1, 10).toInt();
+  await _writeCommand([0x7E, 0x04, 0x02, value, 0x00, 0x00, 0xFF, 0x00, 0xEF]);
+  await _writeCommand([0x7E, 0x00, 0x02, value, 0x00, 0x00, 0x00, 0x00, 0xEF]);
   _updateState(
     _state.copyWith(
       effectSpeed: value,
@@ -454,16 +425,11 @@ Future<void> setEffectSpeed(int speed) async {
 }
 
 Future<void> setEffectLength(int length) async {
-  final value =
-      length.clamp(1, 150).toInt();
-
-  await _writeCommand([
-    0xA0,
-    0x68,
-    0x01,
-    value,
-  ]);
-
+  final value = length.clamp(1, 2000).toInt();
+  final highByte = (value >> 8) & 0xFF;
+  final lowByte = value & 0xFF;
+  await _writeCommand([0x7E, 0x04, 0x03, highByte, lowByte, 0x00, 0xFF, 0x00, 0xEF]);
+  await _writeCommand([0x7E, 0x00, 0x03, highByte, lowByte, 0x00, 0x00, 0x00, 0xEF]);
   _updateState(
     _state.copyWith(
       effectLength: value,
@@ -489,32 +455,21 @@ Future<void> setColor(
   int b, {
   int? brightness,
 }) async {
-  final red = r.clamp(0, 255).toInt();
-  final green = g.clamp(0, 255).toInt();
-  final blue = b.clamp(0, 255).toInt();
+  final red = r.clamp(0, 255);
+  final green = g.clamp(0, 255);
+  final blue = b.clamp(0, 255);
 
-  final level = (brightness ?? _state.brightness)
-      .clamp(0, 255)
-      .toInt();
+  final level =
+      (brightness ?? _state.brightness).clamp(0, 255);
 
-  // Enter solid RGB mode.
-  await _writeCommand([
-    0xA0,
-    0x63,
-    0x01,
-    _solidEffect,
-  ]);
+  await _writeCommand([0x7E, 0x07, 0x05, 0x03, red, green, blue, 0x10, 0xEF]);
+  await _writeCommand([0x7E, 0x00, 0x05, 0x03, red, green, blue, 0x00, 0xEF]);
+  await _writeCommand([0x56, red, green, blue, 0x00, 0xF0, 0xAA]);
 
-  // BanlanX RGB command.
-  await _writeCommand([
-    0xA0,
-    0x69,
-    0x04,
-    red,
-    green,
-    blue,
-    level,
-  ]);
+  if (brightness != null) {
+    await _writeCommand([0x7E, 0x04, 0x01, level, 0x00, 0x00, 0xFF, 0x00, 0xEF]);
+    await _writeCommand([0x7E, 0x00, 0x01, level, 0x00, 0x00, 0x00, 0x00, 0xEF]);
+  }
 
   _updateState(
     _state.copyWith(
@@ -596,47 +551,14 @@ Future<void> _runBatchStrike({
           .clamp(1, 10)
           .toInt();
 
-  // Set color to white first, so the segment spin effect isn't black!
-  // This temporarily switches to solid mode, but the next command
-  // instantly switches it to the spin effect.
-  await _writeCommand([
-    0xA0,
-    0x69,
-    0x04,
-    255,
-    255,
-    255,
-    brightness,
-  ]);
-
-  // White Segment Spin.
-  await _writeCommand([
-    0xA0,
-    0x63,
-    0x01,
-    _whiteSegmentSpinEffect,
-  ]);
-
-  await _writeCommand([
-    0xA0,
-    0x68,
-    0x01,
-    actualLength,
-  ]);
-
-  await _writeCommand([
-    0xA0,
-    0x67,
-    0x01,
-    actualSpeed,
-  ]);
-
-  await _writeCommand([
-    0xA0,
-    0x66,
-    0x01,
-    brightness,
-  ]);
+  // Switch to white solid color just in case
+  await _writeCommand([0x7E, 0x07, 0x05, 0x03, 255, 255, 255, 0x10, 0xEF]);
+  // Set effect
+  await _writeCommand([0x7E, 0x04, 0x03, _whiteSegmentSpinEffect, 0x00, 0x00, 0xFF, 0x00, 0xEF]);
+  // Set speed
+  await _writeCommand([0x7E, 0x04, 0x02, actualSpeed, 0x00, 0x00, 0xFF, 0x00, 0xEF]);
+  // Set brightness
+  await _writeCommand([0x7E, 0x04, 0x01, brightness, 0x00, 0x00, 0xFF, 0x00, 0xEF]);
 
   _updateState(
     _state.copyWith(
@@ -673,26 +595,29 @@ Future<void> _impactFlash({
   required double intensity,
   int? durationMs,
 }) async {
-  final level =
-      (255 * intensity.clamp(0.0, 1.0))
+  final actualIntensity =
+      intensity.clamp(0.0, 1.0);
+
+  final brightness =
+      (255 * actualIntensity)
           .round()
           .clamp(1, 255)
           .toInt();
-
-  await setColor(
-    245,
-    250,
-    255,
-    brightness: level,
-  );
 
   final duration =
       (durationMs ??
       (38 + _random.nextInt(25))) + 20;
 
+  // Solid effect
+  await _writeCommand([0x7E, 0x04, 0x03, _solidEffect, 0x00, 0x00, 0xFF, 0x00, 0xEF]);
+  // Almost white color
+  await _writeCommand([0x7E, 0x07, 0x05, 0x03, 245, 250, 255, 0x10, 0xEF]);
+  // Brightness
+  await _writeCommand([0x7E, 0x04, 0x01, brightness, 0x00, 0x00, 0xFF, 0x00, 0xEF]);
+
   debugPrint(
     '[LIGHTNING] IMPACT '
-    'brightness=$level '
+    'brightness=$brightness '
     'duration=${duration}ms',
   );
 
