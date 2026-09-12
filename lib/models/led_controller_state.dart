@@ -8,12 +8,17 @@ enum Sp621eConnectionState {
 class Sp621eControllerState {
   final Sp621eConnectionState connectionState;
   final bool isOn;
+
   final int brightness;
+
   final int r;
   final int g;
   final int b;
+
   final int effect;
   final int effectSpeed;
+  final int effectLength;
+
   final bool isStormMode;
 
   const Sp621eControllerState({
@@ -23,8 +28,9 @@ class Sp621eControllerState {
     this.r = 255,
     this.g = 255,
     this.b = 255,
-    this.effect = 0,
+    this.effect = 0xBE,
     this.effectSpeed = 5,
+    this.effectLength = 48,
     this.isStormMode = false,
   });
 
@@ -37,10 +43,12 @@ class Sp621eControllerState {
     int? b,
     int? effect,
     int? effectSpeed,
+    int? effectLength,
     bool? isStormMode,
   }) {
     return Sp621eControllerState(
-      connectionState: connectionState ?? this.connectionState,
+      connectionState:
+          connectionState ?? this.connectionState,
       isOn: isOn ?? this.isOn,
       brightness: brightness ?? this.brightness,
       r: r ?? this.r,
