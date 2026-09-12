@@ -11,6 +11,7 @@ import 'model/preset_repository.dart';
 import 'ui/connect_screen.dart';
 import 'ui/control_screen.dart';
 import 'ui/theme.dart';
+import 'services/sp621e_ble_service.dart';
 
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
@@ -56,6 +57,9 @@ class StromSyncApp extends StatelessWidget {
       providers: [
         ChangeNotifierProvider<StormService>(
           create: (_) => StormService()..start(),
+        ),
+        ChangeNotifierProvider<Sp621eBleService>(
+          create: (_) => Sp621eBleService(),
         ),
         ChangeNotifierProvider<AppSettings>.value(value: settings),
         ChangeNotifierProvider<PresetRepository>.value(value: presets),
